@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/proxy"
 	"nanomsg.org/go/mangos/v2"
 	"nanomsg.org/go/mangos/v2/transport"
 )
@@ -35,13 +36,16 @@ func init() {
 }
 
 type dialer struct {
-	addr        string
-	proto       transport.ProtocolInfo
-	hs          transport.Handshaker
-	d           *net.Dialer
-	config      *tls.Config
-	maxRecvSize int
-	lock        sync.Mutex
+	addr               string
+	proto              transport.ProtocolInfo
+	hs                 transport.Handshaker
+	d                  *net.Dialer
+	config             *tls.Config
+	maxRecvSize        int
+	lock               sync.Mutex
+	socksProxy         string
+	socksProxyUser     string
+	socksProxyPassword string
 }
 
 func (d *dialer) Dial() (transport.Pipe, error) {
@@ -51,8 +55,34 @@ func (d *dialer) Dial() (transport.Pipe, error) {
 	maxRecvSize := d.maxRecvSize
 	d.lock.Unlock()
 
-	conn, err := tls.DialWithDialer(d.d, "tcp", d.addr, config)
-	if err != nil {
+	var tconn *net.TCPConn
+	if d.socksProxy != "" {
+		var auth *proxy.Auth
+		if d.socksProxyUser != "" && d.socksProxyPassword != "" {
+			auth = &proxy.Auth{
+				User:     d.socksProxyUser,
+				Password: d.socksProxyPassword,
+			}
+			dialSocksProxy, _ := proxy.SOCKS5("tcp", d.socksProxy, auth, d.d)
+			conn, err := dialSocksProxy.Dial("tcp", d.addr)
+			if err != nil {
+				return nil, err
+			}
+			tconn = conn.(*net.TCPConn)
+		}
+	}
+
+	if tconn == nil {
+		conn, err := d.d.Dial("tcp", d.addr)
+		if err != nil {
+			return nil, err
+		}
+		tconn = conn.(*net.TCPConn)
+	}
+
+	conn := tls.Client(tconn, config)
+	if err := conn.Handshake(); err != nil {
+		conn.Close()
 		return nil, err
 	}
 	opts := make(map[string]interface{})
@@ -100,6 +130,24 @@ func (d *dialer) SetOption(n string, v interface{}) error {
 			} else {
 				d.d.KeepAlive = -1 // Disable
 			}
+			return nil
+		}
+		return mangos.ErrBadValue
+	case mangos.OptionSOCKSProxy:
+		if b, ok := v.(string); ok {
+			d.socksProxy = b
+			return nil
+		}
+		return mangos.ErrBadValue
+	case mangos.OptionSOCKSProxyUser:
+		if b, ok := v.(string); ok {
+			d.socksProxyUser = b
+			return nil
+		}
+		return mangos.ErrBadValue
+	case mangos.OptionSOCKSProxyPassword:
+		if b, ok := v.(string); ok {
+			d.socksProxyPassword = b
 			return nil
 		}
 		return mangos.ErrBadValue

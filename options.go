@@ -192,4 +192,8 @@ const (
 	// Note that mangos v1 behavior is the same as if this option is
 	// set to true.
 	OptionDialAsynch = "DIAL-ASYNCH"
+
+	OptionSOCKSProxy         = "SOCKS-PROXY"
+	OptionSOCKSProxyUser     = "SOCKS-PROXY-USER"
+	OptionSOCKSProxyPassword = "SOCKS-PROXY-PASSWORD"
 )
